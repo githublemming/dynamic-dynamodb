@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """ Configuration management """
+import logging
 import sys
+import time
+
+# todo :- These are here for the hack
+from boto import dynamodb2
+from boto.dynamodb2.table import Table
+
 from dynamic_dynamodb.config import config_file_parser
 from dynamic_dynamodb.config import command_line_parser
 
@@ -191,6 +198,10 @@ def get_configuration():
     # options from the command line should be used
     if 'table_name' in cmd_line_options:
         configuration['tables'] = __get_cmd_table_options(cmd_line_options)
+
+    elif 'dynamodb_table' in conf_file_options:
+        configuration['tables'] = __get_dynamodb_config_options(conf_file_options)
+
     else:
         configuration['tables'] = __get_config_table_options(conf_file_options)
 
@@ -200,6 +211,71 @@ def get_configuration():
     __check_table_rules(configuration)
 
     return configuration
+
+
+def __get_dynamodb_config_options(conf_file_options):
+    """ Get all table options from DynamoDb table
+
+    In order to use this feature your IAM User or Role will need to have access to Read (Scan) the
+    table that contains the data. For security it is recommended that there is a separate statement
+    added to the existing policy that limits read to that table. See below
+
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "dynamodb:Scan",
+          "Resource": "arn:aws:dynamodb:eu-west-1:1234567890:table/dynamic-dynamodb-config-table"
+        }
+      ]
+    }
+
+    The table must have the following field defined:
+    table_name : This is the name of the table to be processed
+
+    :type conf_file_options: dict
+    :param conf_file_options: Dictionary with all config file options
+    :returns: ordereddict -- E.g. {'table_name': {}}
+    """
+    options = ordereddict()
+
+    config_table_name = conf_file_options['dynamodb_table']
+
+    # todo :- this is a HACK : Sort it out !!!! This should be using the logic in aws.dynamodb
+    conn = __get_connection_dynamodb(conf_file_options=conf_file_options)
+    config_table = Table(table_name=config_table_name, connection=conn)
+
+    #
+    # This needs to be aware that the results of the scan may be paginated
+    #
+    for row in config_table.scan():
+
+        table_name = row['table_name']
+        options[table_name] = {}
+
+        # Regular table options
+        for option in DEFAULT_OPTIONS['table'].keys():
+
+            options[table_name][option] = DEFAULT_OPTIONS['table'][option]
+
+            if option not in row:
+                continue
+
+            if option == 'sns_message_types':
+
+                try:
+                    raw_list = row[option]
+                    options[table_name][option] = [i.strip() for i in raw_list.split(',')]
+
+                except:
+                    print(
+                        'Error parsing the "sns-message-types" option: {0}'.format(row[option]))
+
+            else:
+                options[table_name][option] = row[option]
+
+    return options
 
 
 def __get_cmd_table_options(cmd_line_options):
@@ -662,3 +738,52 @@ def __check_table_rules(configuration):
                     table['max_provisioned_writes'],
                     table_name))
             sys.exit(1)
+
+
+def __get_connection_dynamodb(conf_file_options, retries=3):
+    """ Ensure connection to DynamoDB
+
+    :type retries: dict
+    :param conf_file_options: configuration information
+
+    :type retries: int
+    :param retries: Number of times to retry to connect to DynamoDB
+
+    """
+    connected = False
+    region = conf_file_options['region']
+
+    logger = logging.getLogger('dynamic-dynamodb')
+
+    while not connected:
+        if 'aws_access_key_id' in conf_file_options and 'aws_secret_access_key' in conf_file_options:
+
+            logger.debug(
+                'Authenticating to DynamoDB using '
+                'credentials in configuration file')
+
+            connection = dynamodb2.connect_to_region(
+                region,
+                aws_access_key_id=conf_file_options['aws_access_key_id'],
+                aws_secret_access_key=conf_file_options['aws_secret_access_key']
+            )
+
+        else:
+            logger.debug(
+                'Authenticating using boto\'s authentication handler')
+            connection = dynamodb2.connect_to_region(region)
+
+        if not connection:
+            if retries == 0:
+                logger.error('Failed to connect to DynamoDB. Giving up.')
+                raise
+            else:
+                logger.error(
+                    'Failed to connect to DynamoDB. Retrying in 5 seconds')
+                retries -= 1
+                time.sleep(5)
+        else:
+            connected = True
+            logger.debug('Connected to DynamoDB in {0}'.format(region))
+
+    return connection

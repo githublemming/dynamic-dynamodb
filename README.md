@@ -1,3 +1,14 @@
+This Fork
+================
+**Status : In Development**
+
+In this fork of the Dynamic DynamoDB project I am attempting to add the functionality so that you can store the tables to be process by Dynamic DynamoDB in a DynamoDB table to make it easier to Add/Update and Remove tables and there settings
+
+Any problems you have with this aspect of the application should be directed to the issues section of this repository and not the original repository. Any problems not relating to this functionality should be directed at the original developer.
+
+To use this version you will need to package up the code and place it somewhere that is accessible (such as a PyPi repository) and then update the CloudFormation template accordingly.
+
+
 Dynamic DynamoDB
 ================
 

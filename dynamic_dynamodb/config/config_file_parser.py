@@ -539,6 +539,22 @@ def parse(config_path):
                 }
             ])
 
+    #
+    # Handle [dynamodb-config]
+    #
+    if 'dynamodb-config' in config_file.sections():
+        dynamodb_config = __parse_options(
+            config_file,
+            'dynamodb-config',
+            [
+                {
+                    'key': 'dynamodb_table',
+                    'option': 'dynamodb-table',
+                    'required': False,
+                    'type': 'string'
+                },
+            ])
+
     if 'default_options' in config_file.sections():
         # nothing is required in defaults, so we set required to False
         default_config_options = deepcopy(TABLE_CONFIG_OPTIONS)
@@ -557,48 +573,50 @@ def parse(config_path):
     # Handle [table: ]
     #
     table_config = {'tables': ordereddict()}
+    if 'dynamodb-config' not in config_file.sections():
 
-    # Find the first table definition
-    found_table = False
-    for current_section in config_file.sections():
-        if current_section.rsplit(':', 1)[0] != 'table':
-            continue
+        # Find the first table definition
+        found_table = False
+        for current_section in config_file.sections():
+            if current_section.rsplit(':', 1)[0] != 'table':
+                continue
 
-        found_table = True
-        current_table_name = current_section.rsplit(':', 1)[1].strip()
-        table_config['tables'][current_table_name] = \
-            dict(default_options.items() + __parse_options(
-                config_file, current_section, TABLE_CONFIG_OPTIONS).items())
+            found_table = True
+            current_table_name = current_section.rsplit(':', 1)[1].strip()
+            table_config['tables'][current_table_name] = \
+                dict(default_options.items() + __parse_options(
+                    config_file, current_section, TABLE_CONFIG_OPTIONS).items())
 
-    if not found_table:
-        print('Could not find a [table: <table_name>] section in {0}'.format(
-            config_path))
-        sys.exit(1)
-
-    # Find gsi definitions - this allows gsi's to be defined before the table
-    # definitions we don't worry about parsing everything twice here
-    for current_section in config_file.sections():
-        try:
-            header1, gsi_key, header2, table_key = current_section.split(' ')
-        except ValueError:
-            continue
-
-        if header1 != 'gsi:':
-            continue
-
-        if table_key not in table_config['tables']:
-            print('No table configuration matching {0} found.'.format(
-                table_key))
+        if not found_table:
+            print('Could not find a [table: <table_name>] section in {0}'.format(
+                config_path))
             sys.exit(1)
 
-        if 'gsis' not in table_config['tables'][table_key]:
-            table_config['tables'][table_key]['gsis'] = {}
+        # Find gsi definitions - this allows gsi's to be defined before the table
+        # definitions we don't worry about parsing everything twice here
+        for current_section in config_file.sections():
+            try:
+                header1, gsi_key, header2, table_key = current_section.split(' ')
+            except ValueError:
+                continue
 
-        table_config['tables'][table_key]['gsis'][gsi_key] = \
-            ordereddict(default_options.items() + __parse_options(
-                config_file, current_section, TABLE_CONFIG_OPTIONS).items())
+            if header1 != 'gsi:':
+                continue
+
+            if table_key not in table_config['tables']:
+                print('No table configuration matching {0} found.'.format(
+                    table_key))
+                sys.exit(1)
+
+            if 'gsis' not in table_config['tables'][table_key]:
+                table_config['tables'][table_key]['gsis'] = {}
+
+            table_config['tables'][table_key]['gsis'][gsi_key] = \
+                ordereddict(default_options.items() + __parse_options(
+                    config_file, current_section, TABLE_CONFIG_OPTIONS).items())
 
     return ordereddict(
         global_config.items() +
         logging_config.items() +
+        dynamodb_config.items() +
         table_config.items())
